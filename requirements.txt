@@ -1,7 +1,3 @@
-threaded
-time
 numpy
-PIL
-io
 supabase
 requests
