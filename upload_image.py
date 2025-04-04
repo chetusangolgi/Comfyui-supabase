@@ -3,6 +3,7 @@ from PIL import Image
 from io import BytesIO
 import time
 from supabase import create_client
+import re
 
 class SupabaseImageUploader:
     @classmethod
@@ -10,10 +11,10 @@ class SupabaseImageUploader:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "file_name": ("STRING", {"default": "generated_image.png"}),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
-                "bucket": ("STRING", {"default": "images"})
+                "bucket": ("STRING", {"default": "images"}),
+                "base_file_name": ("STRING", {"default": "image"})  # like 'image' → will become image_1.png
             }
         }
 
@@ -22,9 +23,9 @@ class SupabaseImageUploader:
 
     CATEGORY = "Custom/Supabase"
 
-    def upload(self, image, file_name, supabase_url, supabase_key, bucket):
-        # Convert image from tensor to PIL
+    def upload(self, image, supabase_url, supabase_key, bucket, base_file_name):
         try:
+            # Convert tensor to PIL image
             img_np = (image[0] * 255).clip(0, 255).astype(np.uint8)
             img_pil = Image.fromarray(img_np)
 
@@ -32,19 +33,27 @@ class SupabaseImageUploader:
             img_pil.save(buffer, format="PNG")
             buffer.seek(0)
 
-            # Connect to Supabase
             supabase = create_client(supabase_url, supabase_key)
 
-            # Create unique file name with timestamp
-            timestamp = int(time.time())
-            path_on_supabase = f"{timestamp}_{file_name}"
+            # List existing files to determine increment
+            files = supabase.storage.from_(bucket).list()
 
-            # Upload to Supabase bucket
-            res = supabase.storage().from_(bucket).upload(path_on_supabase, buffer.read(), {"content-type": "image/png"})
+            max_index = 0
+            pattern = re.compile(f"^{re.escape(base_file_name)}_(\\d+)\\.png$")
+            for file in files:
+                match = pattern.match(file['name'])
+                if match:
+                    index = int(match.group(1))
+                    max_index = max(max_index, index)
 
-            print(f"Uploaded to Supabase at path: {path_on_supabase}")
+            next_index = max_index + 1
+            filename = f"{base_file_name}_{next_index}.png"
+
+            # Upload to Supabase
+            result = supabase.storage.from_(bucket).upload(filename, buffer.read(), {"content-type": "image/png"})
+            print(f"[Uploader] Uploaded as {filename}")
             return ()
+
         except Exception as e:
-            print("Error uploading to Supabase:", e)
+            print("[Uploader] Error uploading to Supabase:", e)
             return ()
-
