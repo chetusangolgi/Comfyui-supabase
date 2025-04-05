@@ -62,19 +62,22 @@ class SupabaseWatcherNode:
                     sorted_files = sorted(files, key=lambda x: x['created_at'], reverse=True)
                     latest = sorted_files[0]['name']
                     print(f"[SupabaseWatcherNode] Found {len(files)} files, latest: {latest}")
-
+    
                     if latest != self.latest_file:
                         self.latest_file = latest
                         print(f"[SupabaseWatcherNode] New image detected: {latest}")
-                        url = self.supabase.storage.from_(self.bucket_name).get_public_url(latest)
-                        print(f"[SupabaseWatcherNode] Downloading from URL: {url}")
+                        
+                        # Public bucket URL
+                        url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{latest}"
+                        
+                        print(f"[SupabaseWatcherNode] Downloading from public URL: {url}")
                         new_image = self.download_and_prepare_image(url)
                         if new_image is not None:
                             self.output = new_image
                             self._should_rerun = True
                 else:
                     print("[SupabaseWatcherNode] No files found in bucket")
-
+    
                 time.sleep(self.poll_interval)
             except Exception as e:
                 print(f"[SupabaseWatcherNode] Error in poll loop: {str(e)}")
