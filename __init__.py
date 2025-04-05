@@ -1,4 +1,4 @@
-from .load_image import SupabaseWatcherNode
+from .load_image import SupabaseTableWatcherNode
 from .upload_image import SupabaseImageUploader
 
 NODE_CLASS_MAPPINGS = {
