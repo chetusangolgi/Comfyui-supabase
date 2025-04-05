@@ -2,11 +2,11 @@ from .load_image import SupabaseWatcherNode
 from .upload_image import SupabaseImageUploader
 
 NODE_CLASS_MAPPINGS = {
-    "SupabaseWatcherNode": SupabaseWatcherNode,
+    "SupabaseTableWatcherNode": SupabaseTableWatcherNode,
     "SupabaseImageUploader": SupabaseImageUploader,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SupabaseWatcherNode": "Watch Supabase Bucket",
+    "SupabaseTableWatcherNode": "Supabase Table Watcher",
     "SupabaseImageUploader": "Upload Image to Supabase",
 }
