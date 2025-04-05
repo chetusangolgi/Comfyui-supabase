@@ -5,16 +5,16 @@ from PIL import Image
 from io import BytesIO
 from supabase import create_client, Client
 import requests
+import torch
 
 
 class SupabaseWatcherNode:
     def __init__(self):
         self.running = False
         self.latest_file = None
-        # Initialize with a default black image
-        self.output = np.zeros((1, 64, 64, 3), dtype=np.float32)
+        self.output_image = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+        self.output_mask = torch.zeros((1, 64, 64), dtype=torch.float32)
         self.thread = None
-        self.last_poll_time = 0
         self._should_rerun = False
         self.supabase = None
 
@@ -29,8 +29,8 @@ class SupabaseWatcherNode:
             }
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("image", "mask")
     FUNCTION = "start_watcher"
 
     CATEGORY = "Custom/Supabase"
@@ -50,8 +50,7 @@ class SupabaseWatcherNode:
             except Exception as e:
                 print(f"[SupabaseWatcherNode] Error initializing: {e}")
 
-        # Always return a valid image array
-        return (self.output,)
+        return (self.output_image, self.output_mask)
 
     def poll_loop(self):
         while self.running:
@@ -62,22 +61,22 @@ class SupabaseWatcherNode:
                     sorted_files = sorted(files, key=lambda x: x['created_at'], reverse=True)
                     latest = sorted_files[0]['name']
                     print(f"[SupabaseWatcherNode] Found {len(files)} files, latest: {latest}")
-    
+
                     if latest != self.latest_file:
                         self.latest_file = latest
                         print(f"[SupabaseWatcherNode] New image detected: {latest}")
-                        
+
                         # Public bucket URL
                         url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{latest}"
-                        
-                        print(f"[SupabaseWatcherNode] Downloading from public URL: {url}")
-                        new_image = self.download_and_prepare_image(url)
-                        if new_image is not None:
-                            self.output = new_image
+                        print(f"[SupabaseWatcherNode] Downloading from: {url}")
+
+                        image_tensor, mask_tensor = self.download_and_prepare_image(url)
+                        if image_tensor is not None:
+                            self.output_image = image_tensor
+                            self.output_mask = mask_tensor
                             self._should_rerun = True
                 else:
                     print("[SupabaseWatcherNode] No files found in bucket")
-    
                 time.sleep(self.poll_interval)
             except Exception as e:
                 print(f"[SupabaseWatcherNode] Error in poll loop: {str(e)}")
@@ -87,25 +86,27 @@ class SupabaseWatcherNode:
         try:
             response = requests.get(image_url)
             response.raise_for_status()
-            img = Image.open(BytesIO(response.content)).convert("RGB")
-            img = np.array(img).astype(np.float32) / 255.0
-            
-            # Ensure correct shape (1, H, W, 3)
-            if len(img.shape) == 3:
-                img = img[None,]
-            return img
+            img = Image.open(BytesIO(response.content)).convert("RGBA")  # force RGBA
+
+            img_np = np.array(img).astype(np.float32) / 255.0
+            rgb = img_np[..., :3]
+            alpha = img_np[..., 3]
+
+            image_tensor = torch.from_numpy(rgb)[None, ...]  # shape: (1, H, W, 3)
+            mask_tensor = 1.0 - torch.from_numpy(alpha)[None, ...]  # shape: (1, H, W)
+
+            return image_tensor, mask_tensor
         except Exception as e:
             print(f"[SupabaseWatcherNode] Error loading image: {e}")
-            # Return None to keep the current image instead of updating with an error
-            return None
+            return None, None
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        return True  # always run when called
+        return True
 
     def IS_DIRTY(self, *args, **kwargs):
         if self._should_rerun:
-            self._should_rerun = False  # reset the flag
+            self._should_rerun = False
             return True
         return False
 
