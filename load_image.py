@@ -8,10 +8,10 @@ import requests
 import torch
 
 
-class SupabaseWatcherNode:
+class SupabaseTableWatcherNode:
     def __init__(self):
         self.running = False
-        self.latest_file = None
+        self.latest_row_id = None
         self.output_image = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
         self.output_mask = torch.zeros((1, 64, 64), dtype=torch.float32)
         self.thread = None
@@ -24,7 +24,8 @@ class SupabaseWatcherNode:
             "required": {
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
-                "bucket_name": ("STRING", {"default": "images"}),
+                "table_name": ("STRING", {"default": "image_table"}),
+                "image_column": ("STRING", {"default": "image_url"}),
                 "poll_interval": ("INT", {"default": 10, "min": 2, "max": 60}),
             }
         }
@@ -35,10 +36,11 @@ class SupabaseWatcherNode:
 
     CATEGORY = "Custom/Supabase"
 
-    def start_watcher(self, supabase_url, supabase_key, bucket_name, poll_interval):
+    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, poll_interval):
         self.supabase_url = supabase_url
         self.supabase_key = supabase_key
-        self.bucket_name = bucket_name
+        self.table_name = table_name
+        self.image_column = image_column
         self.poll_interval = poll_interval
 
         if not self.running:
@@ -48,56 +50,55 @@ class SupabaseWatcherNode:
                 self.thread = threading.Thread(target=self.poll_loop, daemon=True)
                 self.thread.start()
             except Exception as e:
-                print(f"[SupabaseWatcherNode] Error initializing: {e}")
+                print(f"[SupabaseTableWatcherNode] Error initializing: {e}")
 
         return (self.output_image, self.output_mask)
 
     def poll_loop(self):
         while self.running:
             try:
-                print("[SupabaseWatcherNode] Polling for new images...")
-                files = self.supabase.storage.from_(self.bucket_name).list()
-                if files:
-                    sorted_files = sorted(files, key=lambda x: x['created_at'], reverse=True)
-                    latest = sorted_files[0]['name']
-                    print(f"[SupabaseWatcherNode] Found {len(files)} files, latest: {latest}")
+                print("[SupabaseTableWatcherNode] Polling table for new entries...")
+                response = self.supabase.table(self.table_name).select("*").order("id", desc=True).limit(1).execute()
 
-                    if latest != self.latest_file:
-                        self.latest_file = latest
-                        print(f"[SupabaseWatcherNode] New image detected: {latest}")
+                if response.data:
+                    row = response.data[0]
+                    row_id = row.get("id")
+                    image_url = row.get(self.image_column)
 
-                        # Public bucket URL
-                        url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{latest}"
-                        print(f"[SupabaseWatcherNode] Downloading from: {url}")
+                    if row_id != self.latest_row_id and image_url:
+                        self.latest_row_id = row_id
+                        print(f"[SupabaseTableWatcherNode] New row detected with ID: {row_id}")
+                        print(f"[SupabaseTableWatcherNode] Image URL: {image_url}")
 
-                        image_tensor, mask_tensor = self.download_and_prepare_image(url)
+                        image_tensor, mask_tensor = self.download_and_prepare_image(image_url)
                         if image_tensor is not None:
                             self.output_image = image_tensor
                             self.output_mask = mask_tensor
                             self._should_rerun = True
                 else:
-                    print("[SupabaseWatcherNode] No files found in bucket")
+                    print("[SupabaseTableWatcherNode] No rows found.")
+
                 time.sleep(self.poll_interval)
             except Exception as e:
-                print(f"[SupabaseWatcherNode] Error in poll loop: {str(e)}")
+                print(f"[SupabaseTableWatcherNode] Error in poll loop: {e}")
                 time.sleep(self.poll_interval)
 
     def download_and_prepare_image(self, image_url):
         try:
             response = requests.get(image_url)
             response.raise_for_status()
-            img = Image.open(BytesIO(response.content)).convert("RGBA")  # force RGBA
+            img = Image.open(BytesIO(response.content)).convert("RGBA")
 
             img_np = np.array(img).astype(np.float32) / 255.0
             rgb = img_np[..., :3]
             alpha = img_np[..., 3]
 
-            image_tensor = torch.from_numpy(rgb)[None, ...]  # shape: (1, H, W, 3)
-            mask_tensor = 1.0 - torch.from_numpy(alpha)[None, ...]  # shape: (1, H, W)
+            image_tensor = torch.from_numpy(rgb)[None, ...]
+            mask_tensor = 1.0 - torch.from_numpy(alpha)[None, ...]
 
             return image_tensor, mask_tensor
         except Exception as e:
-            print(f"[SupabaseWatcherNode] Error loading image: {e}")
+            print(f"[SupabaseTableWatcherNode] Error loading image: {e}")
             return None, None
 
     @classmethod
