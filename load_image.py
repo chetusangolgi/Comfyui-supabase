@@ -11,7 +11,8 @@ class SupabaseWatcherNode:
     def __init__(self):
         self.running = False
         self.latest_file = None
-        self.output = None
+        # Initialize with a default black image
+        self.output = np.zeros((1, 64, 64, 3), dtype=np.float32)
         self.thread = None
         self.last_poll_time = 0
         self._should_rerun = False
@@ -42,32 +43,41 @@ class SupabaseWatcherNode:
 
         if not self.running:
             self.running = True
-            self.supabase = create_client(supabase_url, supabase_key)
-            self.thread = threading.Thread(target=self.poll_loop, daemon=True)
-            self.thread.start()
+            try:
+                self.supabase = create_client(supabase_url, supabase_key)
+                self.thread = threading.Thread(target=self.poll_loop, daemon=True)
+                self.thread.start()
+            except Exception as e:
+                print(f"[SupabaseWatcherNode] Error initializing: {e}")
 
-        # Return the latest image (if available)
-        return (self.output,) if self.output is not None else (None,)
+        # Always return a valid image array
+        return (self.output,)
 
     def poll_loop(self):
         while self.running:
             try:
+                print("[SupabaseWatcherNode] Polling for new images...")
                 files = self.supabase.storage.from_(self.bucket_name).list()
                 if files:
                     sorted_files = sorted(files, key=lambda x: x['created_at'], reverse=True)
                     latest = sorted_files[0]['name']
+                    print(f"[SupabaseWatcherNode] Found {len(files)} files, latest: {latest}")
 
                     if latest != self.latest_file:
                         self.latest_file = latest
                         print(f"[SupabaseWatcherNode] New image detected: {latest}")
-                        self.output = self.download_and_prepare_image(
-                            self.supabase.storage.from_(self.bucket_name).get_public_url(latest)
-                        )
-                        self._should_rerun = True  # Flag to re-execute the graph
+                        url = self.supabase.storage.from_(self.bucket_name).get_public_url(latest)
+                        print(f"[SupabaseWatcherNode] Downloading from URL: {url}")
+                        new_image = self.download_and_prepare_image(url)
+                        if new_image is not None:
+                            self.output = new_image
+                            self._should_rerun = True
+                else:
+                    print("[SupabaseWatcherNode] No files found in bucket")
 
                 time.sleep(self.poll_interval)
             except Exception as e:
-                print("[SupabaseWatcherNode] Error in poll loop:", e)
+                print(f"[SupabaseWatcherNode] Error in poll loop: {str(e)}")
                 time.sleep(self.poll_interval)
 
     def download_and_prepare_image(self, image_url):
@@ -76,9 +86,14 @@ class SupabaseWatcherNode:
             response.raise_for_status()
             img = Image.open(BytesIO(response.content)).convert("RGB")
             img = np.array(img).astype(np.float32) / 255.0
-            return img[None,]
+            
+            # Ensure correct shape (1, H, W, 3)
+            if len(img.shape) == 3:
+                img = img[None,]
+            return img
         except Exception as e:
-            print("[SupabaseWatcherNode] Error loading image:", e)
+            print(f"[SupabaseWatcherNode] Error loading image: {e}")
+            # Return None to keep the current image instead of updating with an error
             return None
 
     @classmethod
@@ -90,3 +105,8 @@ class SupabaseWatcherNode:
             self._should_rerun = False  # reset the flag
             return True
         return False
+
+    def __del__(self):
+        self.running = False
+        if self.thread is not None:
+            self.thread.join(timeout=1.0)
