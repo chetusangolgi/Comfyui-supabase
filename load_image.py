@@ -22,9 +22,9 @@ class SupabaseTableWatcherNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
-                "supabase_key": ("STRING", {"default": "your-service-role-key"}),
-                "table_name": ("STRING", {"default": "image_table"}),
+                "supabase_url": ("STRING", {"default": "https://popppjirsdedxhetcphs.supabase.co"}),
+                "supabase_key": ("STRING", {"default": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvcHBwamlyc2RlZHhoZXRjcGhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM3NjMxMDAsImV4cCI6MjA1OTMzOTEwMH0.Ihv60cbfUSeDN5dPDsOZRz4y79ek3D5YZZgKwBsMkSc"}),
+                "table_name": ("STRING", {"default": "inputimagetable"}),
                 "image_column": ("STRING", {"default": "image_url"}),
                 "poll_interval": ("INT", {"default": 10, "min": 2, "max": 60}),
             }
@@ -42,39 +42,41 @@ class SupabaseTableWatcherNode:
         self.table_name = table_name
         self.image_column = image_column
         self.poll_interval = poll_interval
+        self.order_by_column = "created_at"  
 
         if not self.running:
             self.running = True
             try:
-                self.supabase = create_client(supabase_url, supabase_key)
+                self.supabase = create_client(self.supabase_url, self.supabase_key)
+                print("client created")
                 self.thread = threading.Thread(target=self.poll_loop, daemon=True)
                 self.thread.start()
             except Exception as e:
                 print(f"[SupabaseTableWatcherNode] Error initializing: {e}")
-
-        return (self.output_image, self.output_mask)
+                return (self.output_image, self.output_mask)
 
     def poll_loop(self):
         while self.running:
             try:
                 print("[SupabaseTableWatcherNode] Polling table for new entries...")
-                response = self.supabase.table(self.table_name).select("*").order("id", desc=True).limit(1).execute()
+                response =(
+                    self.supabase.table(self.table_name)
+                    .select(self.image_column)
+                    .order(self.order_by_column, desc=True)
+                    .limit(1)
+                    .execute()
+                    )
 
                 if response.data:
-                    row = response.data[0]
-                    row_id = row.get("id")
-                    image_url = row.get(self.image_column)
-
-                    if row_id != self.latest_row_id and image_url:
-                        self.latest_row_id = row_id
-                        print(f"[SupabaseTableWatcherNode] New row detected with ID: {row_id}")
-                        print(f"[SupabaseTableWatcherNode] Image URL: {image_url}")
-
-                        image_tensor, mask_tensor = self.download_and_prepare_image(image_url)
-                        if image_tensor is not None:
-                            self.output_image = image_tensor
-                            self.output_mask = mask_tensor
-                            self._should_rerun = True
+                    image_url = response.data[0][self.image_column]
+            
+                    print(f"[SupabaseTableWatcherNode] Latest image URL: {image_url}")
+                    
+                    image_tensor, mask_tensor = self.download_and_prepare_image(image_url)
+                    if image_tensor is not None:
+                        self.output_image = image_tensor
+                        self.output_mask = mask_tensor
+                        self._should_rerun = True
                 else:
                     print("[SupabaseTableWatcherNode] No rows found.")
 
