@@ -1,9 +1,8 @@
 import numpy as np
 from PIL import Image
 from io import BytesIO
-import time
 from supabase import create_client
-import re
+import datetime
 
 class SupabaseImageUploader:
     @classmethod
@@ -14,46 +13,63 @@ class SupabaseImageUploader:
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
                 "bucket": ("STRING", {"default": "images"}),
-                "base_file_name": ("STRING", {"default": "image"})  # like 'image' → will become image_1.png
+                "base_file_name": ("STRING", {"default": "image"})
             }
         }
 
     RETURN_TYPES = ()
+    RETURN_NAMES = ()
     FUNCTION = "upload"
-
     CATEGORY = "Custom/Supabase"
+    OUTPUT_NODE = True  # This tells ComfyUI this is an output node
 
     def upload(self, image, supabase_url, supabase_key, bucket, base_file_name):
+        result = {"success": False, "message": "", "filename": ""}
+        
         try:
-            # Convert tensor to PIL image
-            img_np = (image[0] * 255).clip(0, 255).astype(np.uint8)
+            # Handle batched input (take first image if batch)
+            if len(image.shape) == 4:
+                image = image[0]
+                
+            # Convert tensor to numpy array
+            img_np = image.cpu().numpy() if hasattr(image, 'cpu') else np.array(image)
+            img_np = (img_np * 255).clip(0, 255).astype(np.uint8)
+            
+            # Convert to RGB if needed
+            if img_np.shape[-1] == 1:
+                img_np = np.repeat(img_np, 3, axis=-1)
+            elif img_np.shape[-1] > 3:
+                img_np = img_np[:, :, :3]
+                
+            # Create PIL Image
             img_pil = Image.fromarray(img_np)
-
+            
+            # Save to buffer
             buffer = BytesIO()
             img_pil.save(buffer, format="PNG")
             buffer.seek(0)
-
+            
+            # Create Supabase client
             supabase = create_client(supabase_url, supabase_key)
-
-            # List existing files to determine increment
-            files = supabase.storage.from_(bucket).list()
-
-            max_index = 0
-            pattern = re.compile(f"^{re.escape(base_file_name)}_(\\d+)\\.png$")
-            for file in files:
-                match = pattern.match(file['name'])
-                if match:
-                    index = int(match.group(1))
-                    max_index = max(max_index, index)
-
-            next_index = max_index + 1
-            filename = f"{base_file_name}_{next_index}.png"
-
+            
+            # Generate filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{base_file_name}_{timestamp}.png"
+            
             # Upload to Supabase
-            result = supabase.storage.from_(bucket).upload(filename, buffer.read(), {"content-type": "image/png"})
-            print(f"[Uploader] Uploaded as {filename}")
-            return ()
-
+            res = supabase.storage.from_(bucket).upload(
+                file=buffer.read(),
+                path=filename,
+                file_options={"content-type": "image/png"}
+            )
+            
+            result["success"] = True
+            result["message"] = "Upload successful"
+            result["filename"] = filename
+            print(f"[SupabaseUploader] Uploaded {filename} to bucket {bucket}")
+            
         except Exception as e:
-            print("[Uploader] Error uploading to Supabase:", e)
-            return ()
+            result["message"] = str(e)
+            print(f"[SupabaseUploader] Error: {e}")
+            
+        return result
