@@ -10,7 +10,7 @@ class SupabaseImageUploader:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "ID": ("ID",),
+                "id": ("ID",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
                 "bucket": ("STRING", {"default": "images"}),
