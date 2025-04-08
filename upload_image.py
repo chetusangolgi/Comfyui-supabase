@@ -63,9 +63,7 @@ class SupabaseImageUploader:
                 path=filename,
                 file_options={"content-type": "image/png"}
             )
-            # Check if upload was successful
-            if res.error:
-                raise Exception(f"Upload failed: {res.error}")
+            
 
             # Save image URL to database (optional)
             image_url = f"{supabase_url}/storage/v1/object/public/{bucket}/{filename}"
