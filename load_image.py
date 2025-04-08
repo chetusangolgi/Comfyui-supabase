@@ -46,7 +46,7 @@ class SupabaseTableWatcherNode:
 
         # Use the first column as the image URL
         image_url = response.data[0][columns[0]]
-        image_id = response.data[0][select_columns[-1]]
+        image_id = response.data[0]["id"]
         print(f"[SupabaseNode] Fetched image URL: {image_url}")
         # Print additional columns if available
         for col in columns[1:]:
