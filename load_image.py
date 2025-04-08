@@ -17,8 +17,8 @@ class SupabaseTableWatcherNode:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK")
-    RETURN_NAMES = ("image", "mask")
+    RETURN_TYPES = ("IMAGE", "MASK","ID")
+    RETURN_NAMES = ("image", "mask","ID")
     FUNCTION = "start_watcher"
 
     CATEGORY = "Custom/Supabase"
@@ -39,12 +39,13 @@ class SupabaseTableWatcherNode:
             raise ValueError("No image data found in Supabase.")
 
         image_url = response.data[0][image_column]
+        image_id = response.data[0]["id"]
         print(f"[SupabaseNode] Fetched image URL: {image_url}")
 
         img = self.load_image(image_url)
         img_out, mask_out = self.pil2tensor(img)
 
-        return (img_out, mask_out)
+        return (img_out, mask_out, image_id)
 
     def load_image(self, image_source):
         if image_source.startswith('http'):

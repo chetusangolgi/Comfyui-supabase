@@ -10,6 +10,7 @@ class SupabaseImageUploader:
         return {
             "required": {
                 "image": ("IMAGE",),
+                "ID": ("STRING",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
                 "bucket": ("STRING", {"default": "images"}),
@@ -23,7 +24,7 @@ class SupabaseImageUploader:
     CATEGORY = "Custom/Supabase"
     OUTPUT_NODE = True  # This tells ComfyUI this is an output node
 
-    def upload(self, image, supabase_url, supabase_key, bucket, base_file_name):
+    def upload(self, image,id, supabase_url, supabase_key, bucket, base_file_name):
         result = {"success": False, "message": "", "filename": ""}
         
         try:
@@ -62,6 +63,14 @@ class SupabaseImageUploader:
                 path=filename,
                 file_options={"content-type": "image/png"}
             )
+            # Check if upload was successful
+            if res.error:
+                raise Exception(f"Upload failed: {res.error}")
+
+            # Save image URL to database (optional)
+            image_url = f"{supabase_url}/storage/v1/object/public/{bucket}/{filename}"
+            #save image URL to database for the given ID
+            response = supabase.table("userInfo").update({"output-image": image_url}).eq("id", id).execute()
             
             result["success"] = True
             result["message"] = "Upload successful"
