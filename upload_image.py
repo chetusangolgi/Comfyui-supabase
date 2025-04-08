@@ -3,22 +3,6 @@ from PIL import Image
 from io import BytesIO
 from supabase import create_client
 import datetime
-import os
-import subprocess
-import sys
-
-def install_requirements():
-    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
-    if os.path.exists(req_path):
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_path])
-            print("✅ Installed packages from requirements.txt")
-        except Exception as e:
-            print(f"⚠️ Failed to install requirements: {e}")
-    else:
-        print("⚠️ No requirements.txt found in custom node.")
-
-install_requirements()
 
 class SupabaseImageUploader:
     @classmethod
