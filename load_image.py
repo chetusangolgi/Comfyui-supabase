@@ -17,8 +17,8 @@ class SupabaseTableWatcherNode:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK","ID")
-    RETURN_NAMES = ("image", "mask","ID")
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("image", "mask")
     FUNCTION = "start_watcher"
 
     CATEGORY = "Custom/Supabase"
@@ -26,16 +26,10 @@ class SupabaseTableWatcherNode:
     def start_watcher(self, supabase_url, supabase_key, table_name, image_column):
         self.supabase = create_client(supabase_url, supabase_key)
 
-        # Split the image_column string into a list of columns
-        columns = [col.strip() for col in image_column.split(',')]
-
-        # Add id to the columns list
-        select_columns = ','.join(columns + ['id'])
-
         # Get latest image URL
         response = (
             self.supabase.table(table_name)
-            .select(select_columns)
+            .select(image_column)
             .order("created_at", desc=True)
             .limit(1)
             .execute()
@@ -44,19 +38,13 @@ class SupabaseTableWatcherNode:
         if not response.data:
             raise ValueError("No image data found in Supabase.")
 
-        # Use the first column as the image URL
-        image_url = response.data[0][columns[0]]
-        image_id = response.data[0]["id"]
+        image_url = response.data[0][image_column]
         print(f"[SupabaseNode] Fetched image URL: {image_url}")
-        print(f"[SupabaseNode] Fetched image ID: {image_id}")
-        # Print additional columns if available
-        for col in columns[1:]:
-            print(f"[SupabaseNode] Additional column {col}: {response.data[0][col]}")
 
         img = self.load_image(image_url)
         img_out, mask_out = self.pil2tensor(img)
 
-        return (img_out, mask_out, image_id)
+        return (img_out, mask_out)
 
     def load_image(self, image_source):
         if image_source.startswith('http'):
