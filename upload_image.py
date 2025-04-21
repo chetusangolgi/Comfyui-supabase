@@ -12,7 +12,7 @@ class SupabaseImageUploader:
                 "image": ("IMAGE",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
-                "bucket": ("STRING", {"default": "images"}),
+                "bucket": ("STRING", {"default": "outputimages"}),
                 "base_file_name": ("STRING", {"default": "image"})
             }
         }
