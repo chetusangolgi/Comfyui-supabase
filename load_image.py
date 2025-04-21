@@ -14,6 +14,7 @@ class SupabaseTableWatcherNode:
                 "supabase_key": ("STRING", {"default": "your-anon-key"}),
                 "table_name": ("STRING", {"default": "inputimagetable"}),
                 "image_column": ("STRING", {"default": "image_url"}),
+                "refresh_trigger": ("INT", {"default": 0})  # Just to force re-run
             }
         }
 
@@ -23,17 +24,23 @@ class SupabaseTableWatcherNode:
 
     CATEGORY = "Custom/Supabase"
 
-    def start_watcher(self, supabase_url, supabase_key, table_name, image_column):
-        self.supabase = create_client(supabase_url, supabase_key)
+    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, refresh_trigger):
+        print("[SupabaseNode] Starting fetch from Supabase...")
 
-        # Get latest image URL
-        response = (
-            self.supabase.table(table_name)
-            .select(image_column)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
+        # Stateless supabase client creation
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Fetch the latest image URL
+        try:
+            response = (
+                supabase.table(table_name)
+                .select(image_column)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception as e:
+            raise RuntimeError(f"[SupabaseNode] Error querying Supabase: {e}")
 
         if not response.data:
             raise ValueError("No image data found in Supabase.")
