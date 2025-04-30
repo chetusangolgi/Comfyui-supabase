@@ -15,7 +15,7 @@ class SupabaseTableWatcherNode:
                 "table_name": ("STRING", {"default": "inputimagetable"}),
                 "image_column": ("STRING", {"default": "image_url"}),
                 "id_column": ("STRING", {"default": "unique_id"}),
-                "refresh_trigger": ("INT", {"default": 0})  # Just to force re-run
+                "unique_id": ("STRING", {"default": ""})
             }
         }
 
@@ -25,19 +25,19 @@ class SupabaseTableWatcherNode:
 
     CATEGORY = "Custom/Supabase"
 
-    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, id_column, refresh_trigger):
+    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, id_column, unique_id):
         print("[SupabaseNode] Starting fetch from Supabase...")
 
         # Stateless supabase client creation
         supabase = create_client(supabase_url, supabase_key)
 
-        # Always get the latest record
+        # Fetch the record matching the unique_id
         try:
             response = (
                 supabase
                 .table(table_name)
                 .select(f"{image_column},{id_column}")
-                .order("created_at", desc=True)
+                .eq(id_column, unique_id)
                 .limit(1)
                 .execute()
             )
@@ -45,10 +45,9 @@ class SupabaseTableWatcherNode:
             raise RuntimeError(f"[SupabaseNode] Error querying Supabase: {e}")
 
         if not response.data:
-            raise ValueError("No image data found in Supabase.")
+            raise ValueError(f"No image data found in Supabase for {id_column}={unique_id}.")
 
         image_url = response.data[0][image_column]
-        # Get the unique_id from the specified column
         fetched_unique_id = response.data[0][id_column]
         print(f"[SupabaseNode] Fetched image URL: {image_url} with {id_column}: {fetched_unique_id}")
 
