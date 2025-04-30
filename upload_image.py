@@ -10,12 +10,14 @@ class SupabaseImageUploader:
         return {
             "required": {
                 "image": ("IMAGE",),
+                "unique_id": ("STRING",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
                 "bucket": ("STRING", {"default": "outputimages"}),
                 "base_file_name": ("STRING", {"default": "image"}),
                 "table_name": ("STRING", {"default": "inputimagetable"}),
-                "unique_id": ("STRING", {"default": ""})
+                "unique_id_column": ("STRING", {"default": "unique_id"}),
+                "table_column": ("STRING", {"default": "output"})
             }
         }
 
@@ -25,7 +27,7 @@ class SupabaseImageUploader:
     CATEGORY = "Custom/Supabase"
     OUTPUT_NODE = True  # This tells ComfyUI this is an output node
 
-    def upload(self, image, supabase_url, supabase_key, bucket, base_file_name, table_name, unique_id):
+    def upload(self, image, supabase_url, supabase_key, bucket, base_file_name, table_name, unique_id, unique_id_column, table_column):
         result = {"success": False, "message": "", "filename": ""}
         
         try:
@@ -59,25 +61,32 @@ class SupabaseImageUploader:
             filename = f"{base_file_name}_{timestamp}.png"
             
             # Upload to Supabase
-            res = supabase.storage.from_(bucket).upload(
+            upload_response = supabase.storage.from_(bucket).upload(
                 file=buffer.read(),
                 path=filename,
                 file_options={"content-type": "image/png"}
             )
-            
+
+            # Check if upload was successful before proceeding
+            if hasattr(upload_response, "status_code") and upload_response.status_code not in [200, 201]:
+                result["message"] = f"Upload failed: {getattr(upload_response, 'data', upload_response)}"
+                print(f"[SupabaseUploader] Error: {result['message']}")
+                return result
+
             # Get the public URL for the uploaded image
             public_url = supabase.storage.from_(bucket).get_public_url(filename)
-            
-            # Update the table with the output image URL if unique_id is provided
-            if unique_id:
+
+            # Only update the table if the public_url is not None or empty
+            if unique_id and public_url:
                 try:
+                    update_data = {table_column: public_url}
                     update_response = (
                         supabase.table(table_name)
-                        .update({"output_image_url": public_url})
-                        .eq("id", unique_id)
+                        .update(update_data)
+                        .eq(unique_id_column, unique_id)
                         .execute()
                     )
-                    print(f"[SupabaseUploader] Updated table {table_name} for ID {unique_id} with output URL")
+                    print(f"[SupabaseUploader] Updated table {table_name} for {unique_id_column}={unique_id} with {table_column} URL")
                 except Exception as e:
                     print(f"[SupabaseUploader] Error updating table: {e}")
             

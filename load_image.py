@@ -14,7 +14,7 @@ class SupabaseTableWatcherNode:
                 "supabase_key": ("STRING", {"default": "your-anon-key"}),
                 "table_name": ("STRING", {"default": "inputimagetable"}),
                 "image_column": ("STRING", {"default": "image_url"}),
-                "unique_id": ("STRING", {"default": ""}),
+                "id_column": ("STRING", {"default": "unique_id"}),
                 "refresh_trigger": ("INT", {"default": 0})  # Just to force re-run
             }
         }
@@ -25,24 +25,22 @@ class SupabaseTableWatcherNode:
 
     CATEGORY = "Custom/Supabase"
 
-    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, unique_id, refresh_trigger):
+    def start_watcher(self, supabase_url, supabase_key, table_name, image_column, id_column, refresh_trigger):
         print("[SupabaseNode] Starting fetch from Supabase...")
 
         # Stateless supabase client creation
         supabase = create_client(supabase_url, supabase_key)
 
-        # Fetch the image URL based on unique_id if provided, otherwise get the latest
+        # Always get the latest record
         try:
-            query = supabase.table(table_name)
-            
-            if unique_id:
-                # If unique_id is provided, fetch that specific record
-                query = query.eq('id', unique_id)
-            else:
-                # Otherwise, get the latest record
-                query = query.order("created_at", desc=True)
-            
-            response = query.select(image_column, 'id').limit(1).execute()
+            response = (
+                supabase
+                .table(table_name)
+                .select(f"{image_column},{id_column}")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
         except Exception as e:
             raise RuntimeError(f"[SupabaseNode] Error querying Supabase: {e}")
 
@@ -50,9 +48,9 @@ class SupabaseTableWatcherNode:
             raise ValueError("No image data found in Supabase.")
 
         image_url = response.data[0][image_column]
-        # Get the unique_id (id) from the response
-        fetched_unique_id = response.data[0]['id']
-        print(f"[SupabaseNode] Fetched image URL: {image_url} with ID: {fetched_unique_id}")
+        # Get the unique_id from the specified column
+        fetched_unique_id = response.data[0][id_column]
+        print(f"[SupabaseNode] Fetched image URL: {image_url} with {id_column}: {fetched_unique_id}")
 
         img = self.load_image(image_url)
         img_out, mask_out = self.pil2tensor(img)
