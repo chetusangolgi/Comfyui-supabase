@@ -1,6 +1,6 @@
 from .load_image import SupabaseTableWatcherNode
 from .upload_image import SupabaseImageUploader
-from .uploadaudio import SupabaseAudioUploader  # ✅ Add this line
+from .upload_audio import SupabaseAudioUploader  # ✅ Add this line
 
 NODE_CLASS_MAPPINGS = {
     "SupabaseTableWatcherNode": SupabaseTableWatcherNode,
