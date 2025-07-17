@@ -1,15 +1,16 @@
 import numpy as np
 from io import BytesIO
 import datetime
-import soundfile as sf  # pip install soundfile
 from supabase import create_client
+from pydub import AudioSegment  # pip install pydub
+import os
 
 class SupabaseAudioUploader:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "audio": ("AUDIO",),  # This must be supported by your ComfyUI extension
+                "audio": ("AUDIO",),  # Should be a tuple (numpy_array, sample_rate)
                 "unique_id": ("STRING",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
@@ -31,37 +32,53 @@ class SupabaseAudioUploader:
         result = {"success": False, "message": "", "filename": ""}
 
         try:
-            # Unpack audio object (assuming a tuple of (data, sample_rate))
-            audio_data, sample_rate = audio  # Ensure input node provides it this way
-            
-            if isinstance(audio_data, np.ndarray):
-                buffer = BytesIO()
-                sf.write(buffer, audio_data, sample_rate, format='WAV')
-                buffer.seek(0)
+            # Unpack audio tuple: (numpy_array, sample_rate)
+            audio_data, sample_rate = audio
+
+            # Ensure it's mono or stereo
+            if len(audio_data.shape) == 1:
+                channels = 1
+            elif len(audio_data.shape) == 2:
+                channels = audio_data.shape[1]
             else:
-                raise ValueError("Audio input is not a valid NumPy array with sample rate")
+                raise ValueError("Unsupported audio shape. Expected 1D or 2D numpy array.")
+
+            # Convert numpy to raw audio and export to MP3 using pydub
+            audio_segment = AudioSegment(
+                audio_data.tobytes(),
+                frame_rate=sample_rate,
+                sample_width=audio_data.dtype.itemsize,
+                channels=channels
+            )
+
+            buffer = BytesIO()
+            audio_segment.export(buffer, format="mp3")
+            buffer.seek(0)
 
             # Create Supabase client
             supabase = create_client(supabase_url, supabase_key)
 
             # Generate filename
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{base_file_name}_{timestamp}.wav"
+            filename = f"{base_file_name}_{timestamp}.mp3"
 
             # Upload to Supabase
             upload_response = supabase.storage.from_(bucket).upload(
                 file=buffer.read(),
                 path=filename,
-                file_options={"content-type": "audio/wav"}
+                file_options={"content-type": "audio/mpeg"}
             )
 
+            # Check upload success
             if hasattr(upload_response, "status_code") and upload_response.status_code not in [200, 201]:
                 result["message"] = f"Upload failed: {getattr(upload_response, 'data', upload_response)}"
                 print(f"[SupabaseAudioUploader] Error: {result['message']}")
                 return result
 
+            # Get public URL
             public_url = supabase.storage.from_(bucket).get_public_url(filename)
 
+            # Update Supabase table with audio URL
             if unique_id and public_url:
                 try:
                     update_data = {table_column: public_url}
