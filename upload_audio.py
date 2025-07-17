@@ -1,16 +1,15 @@
-import numpy as np
-from io import BytesIO
 import datetime
+from io import BytesIO
+import numpy as np
+from pydub import AudioSegment
 from supabase import create_client
-from pydub import AudioSegment  # pip install pydub
-import os
 
 class SupabaseAudioUploader:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "audio": ("AUDIO",),  # Should be a tuple (numpy_array, sample_rate)
+                "audio": ("AUDIO",),  # ComfyUI passes a dict with 'waveform' and 'sample_rate'
                 "unique_id": ("STRING",),
                 "supabase_url": ("STRING", {"default": "https://your-project.supabase.co"}),
                 "supabase_key": ("STRING", {"default": "your-service-role-key"}),
@@ -32,22 +31,41 @@ class SupabaseAudioUploader:
         result = {"success": False, "message": "", "filename": ""}
 
         try:
-            # Unpack audio tuple: (numpy_array, sample_rate)
-            audio_data, sample_rate = audio
+            print(f"[SupabaseAudioUploader] Received audio type: {type(audio)}")
+            print(f"[SupabaseAudioUploader] Audio dict keys: {list(audio.keys())}")
 
-            # Ensure it's mono or stereo
-            if len(audio_data.shape) == 1:
-                channels = 1
-            elif len(audio_data.shape) == 2:
-                channels = audio_data.shape[1]
+            if not isinstance(audio, dict) or "waveform" not in audio or "sample_rate" not in audio:
+                raise ValueError("Expected audio dict with 'waveform' and 'sample_rate' keys")
+
+            waveform = audio["waveform"]
+            sample_rate = audio["sample_rate"]
+
+            # Convert to NumPy
+            if hasattr(waveform, "cpu"):
+                waveform = waveform.cpu().numpy()
+
+            # waveform shape: (1, channels, samples)
+            if len(waveform.shape) == 3:
+                waveform = waveform[0]  # remove batch dim
+
+            channels = waveform.shape[0]
+            samples = waveform.shape[1]
+            print(f"[SupabaseAudioUploader] Audio shape: {waveform.shape}, channels: {channels}, samples: {samples}")
+
+            # Reshape to (samples, channels) for pydub
+            audio_np = waveform.T.astype(np.float32)
+            audio_int16 = (audio_np * 32767.0).clip(-32768, 32767).astype(np.int16)
+
+            # Flatten to mono if channels == 1
+            if channels == 1:
+                audio_bytes = audio_int16.tobytes()
             else:
-                raise ValueError("Unsupported audio shape. Expected 1D or 2D numpy array.")
+                audio_bytes = audio_int16.reshape(-1, channels).tobytes()
 
-            # Convert numpy to raw audio and export to MP3 using pydub
             audio_segment = AudioSegment(
-                audio_data.tobytes(),
+                audio_bytes,
                 frame_rate=sample_rate,
-                sample_width=audio_data.dtype.itemsize,
+                sample_width=2,  # int16 = 2 bytes
                 channels=channels
             )
 
@@ -55,40 +73,29 @@ class SupabaseAudioUploader:
             audio_segment.export(buffer, format="mp3")
             buffer.seek(0)
 
-            # Create Supabase client
+            # Supabase upload
             supabase = create_client(supabase_url, supabase_key)
-
-            # Generate filename
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{base_file_name}_{timestamp}.mp3"
 
-            # Upload to Supabase
             upload_response = supabase.storage.from_(bucket).upload(
                 file=buffer.read(),
                 path=filename,
                 file_options={"content-type": "audio/mpeg"}
             )
 
-            # Check upload success
             if hasattr(upload_response, "status_code") and upload_response.status_code not in [200, 201]:
                 result["message"] = f"Upload failed: {getattr(upload_response, 'data', upload_response)}"
                 print(f"[SupabaseAudioUploader] Error: {result['message']}")
                 return result
 
-            # Get public URL
             public_url = supabase.storage.from_(bucket).get_public_url(filename)
 
-            # Update Supabase table with audio URL
             if unique_id and public_url:
                 try:
                     update_data = {table_column: public_url}
-                    update_response = (
-                        supabase.table(table_name)
-                        .update(update_data)
-                        .eq(unique_id_column, unique_id)
-                        .execute()
-                    )
-                    print(f"[SupabaseAudioUploader] Updated table {table_name} for {unique_id_column}={unique_id} with {table_column} URL")
+                    supabase.table(table_name).update(update_data).eq(unique_id_column, unique_id).execute()
+                    print(f"[SupabaseAudioUploader] Updated {table_name} for {unique_id_column}={unique_id}")
                 except Exception as e:
                     print(f"[SupabaseAudioUploader] Error updating table: {e}")
 
